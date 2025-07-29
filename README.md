@@ -1,2 +1,3 @@
 # cuda_example
-a example for using cuda
+
+使用cuda、cudnn、tensorrt的例子
