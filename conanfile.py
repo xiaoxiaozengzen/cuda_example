@@ -31,7 +31,6 @@ class ExampleConan(ConanFile):
     def requirements(self):
         if self.options.with_cuda:
             self.requires(f"cudatoolkit/{self.options.with_cuda}")
-        self.requires("cudnn/8.8.1")
 
     def generate(self):
         tc = CMakeToolchain(self)
