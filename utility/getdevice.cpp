@@ -52,6 +52,8 @@ void get_device_property(int device) {
               << devProp.maxGridSize[1] << ", " << devProp.maxGridSize[2] << "]"
               << "\n  Clock rate: " << static_cast<float>(devProp.clockRate) / 1000 << " MHz"
               << "\n  Total constant memory: " << static_cast<float>(devProp.totalConstMem) / 1024 << " KB"
+              << "\n  asyncEngineCount: " << devProp.asyncEngineCount
+              << "\n  cudaDevAttrConcurrentKernels: " << devProp.concurrentKernels
               << std::endl;
     int driverVersion = 0;
     int runtimeVersion = 0;
