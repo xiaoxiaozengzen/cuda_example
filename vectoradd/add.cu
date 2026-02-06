@@ -21,13 +21,13 @@ using namespace std;
  * 
  * block_id = blockIdx.x + blockIdx.y * gridDim.x
  * threadsPerBlock = blockDim.x * blockDim.y * blockDim.z
- * local_thread_id = threadIdx.y * blockDim.x + threadIdx.x
+ * local_thread_id = threadIdx.x + threadIdx.y * blockDim.x
  * global_id = block_id * threadsPerBlock + local_thread_id
- *           = (blockIdx.x + blockIdx.y * gridDim.x) * (blockDim.x * blockDim.y * blockDim.z) + (threadIdx.y * blockDim.x + threadIdx.x)
+ *           = (blockIdx.x + blockIdx.y * gridDim.x) * (blockDim.x * blockDim.y * blockDim.z) + (threadIdx.x + threadIdx.y * blockDim.x)
  */
 __global__ void VecAdd(int* A, int* B, int* C)
 {
-    int i = (blockIdx.x + blockIdx.y * gridDim.x) * (blockDim.x * blockDim.y * blockDim.z) + (threadIdx.y * blockDim.x + threadIdx.x);
+    int i = (blockIdx.x + blockIdx.y * gridDim.x) * (blockDim.x * blockDim.y * blockDim.z) + (threadIdx.x + threadIdx.y * blockDim.x);
     C[i] = A[i] + B[i];
 }
 
