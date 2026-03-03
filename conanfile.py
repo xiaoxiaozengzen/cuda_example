@@ -18,10 +18,12 @@ class ExampleConan(ConanFile):
     options = {
         "Debug": [True, False],
         "with_cuda": [False, "11.1.1", "11.4.1", "12.1.1", "system", "11.8.0", "11.7.1"],
+        "with_tensorrt": [False, "8.5.3.1", "10.0.1.6", "system"],
     }
     default_options = {
         "Debug": False,
         "with_cuda": "11.7.1",
+        "with_tensorrt": "8.5.3.1"
     }
 
     @property
@@ -31,6 +33,8 @@ class ExampleConan(ConanFile):
     def requirements(self):
         if self.options.with_cuda:
             self.requires(f"cudatoolkit/{self.options.with_cuda}")
+        if self.options.with_tensorrt:
+            self.requires(f"tensorrt/{self.options.with_tensorrt}")
 
     def generate(self):
         tc = CMakeToolchain(self)

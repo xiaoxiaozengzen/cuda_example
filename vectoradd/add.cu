@@ -5,6 +5,17 @@
 
 using namespace std;
 
+#define CHECK_CUDA(call)                                                   \
+    do {                                                                   \
+        cudaError_t err = call;                                           \
+        if (err != cudaSuccess) {                                         \
+            std::cerr << "CUDA error in " << __FILE__ << " at line "      \
+                      << __LINE__ << ": " << cudaGetErrorString(err)      \
+                      << " (" << err << ")" << std::endl;                 \
+            exit(EXIT_FAILURE);                                           \
+        }                                                                 \
+    } while (0)
+
 /**
  * @brief CUDA kernel function
  * <<<Dg, Db, Ns, S>>>：
@@ -51,16 +62,16 @@ void vec_add_example() {
     host_first = new int[N];
     host_second = new int[N];
     host_result = new int[N];    
-    cudaMalloc(&device_first, N*sizeof(int));
-    cudaMalloc(&device_second, N*sizeof(int));
-    cudaMalloc(&device_result, N*sizeof(int));
+    CHECK_CUDA(cudaMalloc(&device_first, N*sizeof(int)));
+    CHECK_CUDA(cudaMalloc(&device_second, N*sizeof(int)));
+    CHECK_CUDA(cudaMalloc(&device_result, N*sizeof(int)));
 
     for(int i=0;i<N;i++) {
       host_first[i] = i + 1;
       host_second[i] = 2*(i + 1);
     }
-    cudaMemcpy(device_first, host_first, N*sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemcpy(device_second, host_second, N*sizeof(int), cudaMemcpyHostToDevice);
+    CHECK_CUDA(cudaMemcpy(device_first, host_first, N*sizeof(int), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpy(device_second, host_second, N*sizeof(int), cudaMemcpyHostToDevice));
 
     dim3 gridDim(2, 1, 1);   // Number of blocks in the grid
     dim3 blockDim(5, 2, 1); // Number of threads in each block
@@ -69,7 +80,7 @@ void vec_add_example() {
     std::cout << "Total threads: " << (gridDim.x * gridDim.y) * (blockDim.x * blockDim.y * blockDim.z) << std::endl;
     VecAdd<<<gridDim, blockDim>>>(device_first, device_second, device_result);
 
-    cudaMemcpy(host_result, device_result, N*sizeof(int), cudaMemcpyDeviceToHost);
+    CHECK_CUDA(cudaMemcpy(host_result, device_result, N*sizeof(int), cudaMemcpyDeviceToHost));
     cout << "host_first: " << endl;
     for(int i=0;i<N;i++) {
         cout << std::setw(3) << host_first[i] << " ";
@@ -89,9 +100,9 @@ void vec_add_example() {
     delete[] host_first;
     delete[] host_second;
     delete[] host_result;
-    cudaFree(device_first);
-    cudaFree(device_second);
-    cudaFree(device_result);
+    CHECK_CUDA(cudaFree(device_first));
+    CHECK_CUDA(cudaFree(device_second));
+    CHECK_CUDA(cudaFree(device_result));
 }
 
 int main(){
