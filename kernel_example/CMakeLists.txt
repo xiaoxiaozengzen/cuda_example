@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.23)
 set(CMAKE_CUDA_ARCHITECTURES 75)
-project(vectoradd)
+project(kernel_example)
 
 include(CheckLanguage)
 check_language(CUDA)
