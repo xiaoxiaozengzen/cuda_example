@@ -35,6 +35,10 @@ using namespace std;
  * local_thread_id = threadIdx.x + threadIdx.y * blockDim.x
  * global_id = block_id * threadsPerBlock + local_thread_id
  *           = (blockIdx.x + blockIdx.y * gridDim.x) * (blockDim.x * blockDim.y * blockDim.z) + (threadIdx.x + threadIdx.y * blockDim.x)
+ *
+ * @note kernel函数中只要使用*去解引用指针，则必须保证指针指向的是设备内存，
+ *       否则会出现非法访问错误（Illegal memory access）。
+ *       因此，在kernel函数中，所有指针参数都必须是设备内存的地址。
  */
 __global__ void VecAdd(int* A, int* B, int* C)
 {
@@ -105,9 +109,36 @@ void vec_add_example() {
     CHECK_CUDA(cudaFree(device_result));
 }
 
+__global__ void atomicAdd_kernel(int* data, int* old_data) {
+    int old = atomicAdd(data, 1);
+    if (old_data) {
+        *old_data = old;
+    }
+}
+
+void atomicAdd_example() {
+    int h_src_data = 10;
+    int h_old_data = 0;
+    int* d_src_data = nullptr;
+    int* d_old_data = nullptr;
+    CHECK_CUDA(cudaMalloc(&d_src_data, sizeof(int)));
+    CHECK_CUDA(cudaMalloc(&d_old_data, sizeof(int)));
+    CHECK_CUDA(cudaMemcpy(d_src_data, &h_src_data, sizeof(int), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpy(d_old_data, &h_old_data, sizeof(int), cudaMemcpyHostToDevice));
+    std::cout << "Before atomicAdd, src_data: " << h_src_data << ", old_data: " << h_old_data << std::endl;
+    atomicAdd_kernel<<<1, 1>>>(d_src_data, d_old_data);
+    CHECK_CUDA(cudaMemcpy(&h_src_data, d_src_data, sizeof(int), cudaMemcpyDeviceToHost));
+    CHECK_CUDA(cudaMemcpy(&h_old_data, d_old_data, sizeof(int), cudaMemcpyDeviceToHost));
+    std::cout << "After atomicAdd, src_data: " << h_src_data << ", old_data: " << h_old_data << std::endl;
+    CHECK_CUDA(cudaFree(d_src_data));
+    CHECK_CUDA(cudaFree(d_old_data));
+}
+
 int main(){
     std::cout << "================ Vector Addition Example ================" << std::endl;
     vec_add_example();
+    std::cout << "================ Atomic Add Example ================" << std::endl;
+    atomicAdd_example();
 
     return 0;
 }
