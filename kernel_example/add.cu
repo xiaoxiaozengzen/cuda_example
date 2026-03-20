@@ -134,11 +134,32 @@ void atomicAdd_example() {
     CHECK_CUDA(cudaFree(d_old_data));
 }
 
+__global__ void num_test_kernel(int* counter) {
+    atomicAdd(counter, 1);
+}
+
+void exec_num_test() {
+    int h_counter = 0;
+    int* d_counter = nullptr;
+    CHECK_CUDA(cudaMalloc(&d_counter, sizeof(int)));
+    CHECK_CUDA(cudaMemcpy(d_counter, &h_counter, sizeof(int), cudaMemcpyHostToDevice));
+    dim3 gridDim(5, 2, 1);   // Number of blocks in the grid
+    dim3 blockDim(10, 3, 1); // Number of threads in each block
+    num_test_kernel<<<gridDim, blockDim>>>(d_counter);
+    CHECK_CUDA(cudaMemcpy(&h_counter, d_counter, sizeof(int), cudaMemcpyDeviceToHost));
+
+    int expected_count = (gridDim.x * gridDim.y) * (blockDim.x * blockDim.y * blockDim.z);
+    std::cout << "Total increments: " << h_counter << " (expected: " << expected_count << ")" << std::endl;
+    CHECK_CUDA(cudaFree(d_counter));
+}
+
 int main(){
     std::cout << "================ Vector Addition Example ================" << std::endl;
     vec_add_example();
     std::cout << "================ Atomic Add Example ================" << std::endl;
     atomicAdd_example();
+    std::cout << "================ Num Test Example ================" << std::endl;
+    exec_num_test();
 
     return 0;
 }
