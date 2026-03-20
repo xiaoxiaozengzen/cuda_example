@@ -50,14 +50,57 @@ static std::vector<char> readFile(const std::string& path) {
 static size_t volume(const nvinfer1::Dims& d) {
     size_t v = 1;
     for (int i = 0; i < d.nbDims; ++i) {
+        if(d.d[i] < 0) {
+            std::cerr << "Invalid dimension size: " << d.d[i] << "\n";
+            throw std::runtime_error("Invalid dimension size");
+            return 0;
+        }
         v *= static_cast<size_t>(d.d[i]);
     }
     return v;
 }
 
+/**
+ * @brief 计算给定张量格式和元素大小的内存需求
+ * @param  dims             张量的维度信息
+ * @param  format           张量的存储格式
+ * @param  elementSize      每个元素的大小（字节）
+ * @return size_t           所需的内存大小（字节）
+ *
+ * @note tensorFormat会影响TensorRT在内存中如何存储这个tensor，
+ *       例如是否需要对齐，提高kernel执行效率等。
+ */
+size_t adaptTensorFormatAlloc(const nvinfer1::Dims& dims, nvinfer1::TensorFormat format, size_t elementSize) {
+    size_t vol = volume(dims);
+    switch (format) {
+        // 线性格式通常不需要额外的对齐
+        case nvinfer1::TensorFormat::kLINEAR:
+        // HWC格式一般不需要额外的对齐
+        case nvinfer1::TensorFormat::kHWC:
+            return vol * elementSize;
+        case nvinfer1::TensorFormat::kCHW2:
+        {
+            size_t old_c = dims.d[1]; // C
+            size_t new_c = ((old_c + 2 - 1) / 2) * 2; // 向上对齐到2的倍数
+            size_t new_volume = dims.d[0] * new_c * dims.d[2] * dims.d[3]; // N * C' * H * W
+            return new_volume * elementSize;
+        }
+        case nvinfer1::TensorFormat::kHWC8:
+        {
+            size_t old_c = dims.d[1]; // C
+            size_t new_c = ((old_c + 8 - 1) / 8) * 8; // 向上对齐到8的倍数
+            size_t new_volume = dims.d[0] * dims.d[2] * dims.d[3] * new_c; // N * H * W * C'
+            return new_volume * elementSize;
+        }
+        default:
+            return vol * elementSize; // 默认情况下按线性格式计算
+    }
+
+}
+
 int main() {
-    std::string engine_file = "/mnt/workspace/cgz_workspace/Exercise/python_example/pytorch/deploy.engine";
-    auto engineData = readFile(engine_file);
+    std::string engine_file = "/mnt/workspace/cgz_workspace/Exercise/cuda_example/tensorrt_example/input/deploy.engine";
+    std::vector<char> engineData = readFile(engine_file);
     if(engineData.empty()) {
         std::cerr << "Failed to read engine file\n";
         return -1;
@@ -70,8 +113,10 @@ int main() {
      * - createInferRuntime：创建一个TensorRT运行时对象，负责管理引擎的生命周期和执行环境。
      * - IRuntime::deserializeCudaEngine：将反序列化的引擎数据转换为ICudaEngine实例，准备执行推理。
      * - IRuntime::createExecutionContext：为引擎创建一个执行上下文，负责管理推理过程中输入输出的绑定和执行状态
+     *
+     * @note createInferRuntime可以多次调用，每次创建一个实例。但是推荐一个进程只调用一次
      */
-    auto runtime = nvinfer1::createInferRuntime(gLogger);
+    nvinfer1::IRuntime* runtime = nvinfer1::createInferRuntime(gLogger);
     if(!runtime) {
         std::cerr << "Failed to create TensorRT runtime\n";
         return -1;
@@ -86,7 +131,7 @@ int main() {
      *
      * @note ICudaEngine用于执行推理，包含了网络结构、权重和执行配置等信息。
      */
-    auto engine = runtime->deserializeCudaEngine(engineData.data(), engineData.size());
+    nvinfer1::ICudaEngine* engine = runtime->deserializeCudaEngine(engineData.data(), engineData.size());
     if(!engine) {
         std::cerr << "Failed to deserialize CUDA engine\n";
         return -1;
@@ -98,10 +143,12 @@ int main() {
      *
      * @note IExecutionContext用于管理推理过程中输入输出的绑定和执行状态。
      * @note 如果engine是动态的（包含动态输入），则需要在执行上下文中设置profile。
-     *       第一个创建的IExecutionContext会默认调用setOptimizationProfile(0)，如果有多个profile需要切换，必须显式
-     *       调用setOptimizationProfile()方法来选择适当的profile，以确保输入输出的shape在执行时得到正确处理。
+     *       第一个创建的IExecutionContext会默认调用setOptimizationProfile(0)
+     * @note 动态shape的engine一般有多个profile(例如，小batch/大batch)
+     *       如果有多个profile需要切换，必须显式调用setOptimizationProfile()方法来选择适当的profile，
+     *       以确保输入输出的shape在执行时得到正确处理。并且profile也会影响trt选用的内核和性能策略等
      */
-    auto context = engine->createExecutionContext();
+    nvinfer1::IExecutionContext* context = engine->createExecutionContext();
     if(!context) {
         std::cerr << "Failed to create execution context\n";
         return -1;
@@ -116,15 +163,61 @@ int main() {
       - getIOTensorName：根据索引获取输入输出张量的名称。
       - getTensorIOMode：根据张量名称，判断其是输入还是输出张量，返回TensorIOMode枚举值（kINPUT或kOUTPUT或kNONE）。
      */
+    int profile_num = engine->getNbOptimizationProfiles();
+    std::cout << "Engine has " << profile_num << " optimization profiles\n";
     std::cout << "Engine has " << engine->getNbIOTensors() << " I/O tensors\n";
     for (int i = 0; i < engine->getNbIOTensors(); ++i) {
         const char* name = engine->getIOTensorName(i);
         std::cout << "Tensor " << i << ": " << name << "\n";
+        nvinfer1::Dims shape = engine->getTensorShape(name);
+        std::cout << "  Shape(" << shape.nbDims << "): [";
+        for (int j = 0; j < shape.nbDims; ++j) {
+            std::cout << shape.d[j] << (j < shape.nbDims - 1 ? ", " : "");
+        }
+        std::cout << "]\n";
         if (engine->getTensorIOMode(name) == nvinfer1::TensorIOMode::kINPUT) {
             inputName = name;
+            /**
+             * 获取一个input tensor的min/opt/max维度信息基于其使用的profile
+             */
+            nvinfer1::Dims profile_shape = engine->getProfileShape(name, profile_num - 1, nvinfer1::OptProfileSelector::kMAX); // profile 0
+            std::cout << "  Profile shape: [";
+            for (int j = 0; j < profile_shape.nbDims; ++j) {
+                std::cout << profile_shape.d[j] << (j < profile_shape.nbDims - 1 ? ", " : "");
+            }
+            std::cout << "]\n";
         } else {
             outputName = name;
-        } 
+        }
+        /**
+         * enum class DataType : int32_t {
+         *   kFLOAT = 0,   // 32-bit floating point
+         *   kHALF = 1,    // 16-bit floating point
+         *   kINT8 = 2,    // 8-bit integer
+         *   kINT32 = 3,   // 32-bit integer
+         *   kBOOL = 4     // Boolean
+         * }
+         */
+        nvinfer1::DataType dtype = engine->getTensorDataType(name);
+        std::cout << "  Data type: " << static_cast<int>(dtype) << "\n";
+        /**
+         * enum class TensorFormat : int32_t {
+         *   kLINEAR = 0,  // 行优先的线性格式，适用于大多数情况
+         *   kCHW2 = 1,    // CHW2
+         *   kHWC8 = 2,    // HWC8
+         *   kCHW4 = 3,    // CHW4
+         *   kHWC16 = 4,   // HWC16
+         *   kDLA_HWC4 = 5 // DLA HWC4
+         * }
+         * @note NCHW，表示[numbers, channels, height, width]，其w元素是连续的，即：
+         *       w+1，地址加1；h+1，地址加w；c+1，地址加w*h；n+1，地址加w*h*c
+         * @note HWC，C数据是连续的，即x[h][w][0]=R, x[h][w][1]=G, x[h][w][2]=B
+         * @note CHW，x[0,:,:]R通道整张图，x[1,:,:]G通道整张图，x[2,:,:]B通道整张图
+         * @note HWC8，C的数量按照8对齐，例如C=3时会补齐到8，实际存储元素数为 H*W*8，访问时需要跳过补齐的元素
+         * @note CHW4，C的数量按照4对齐，例如C=3时会补齐到4，实际存储元素数为 4*H*W，访问时需要跳过补齐的元素
+         */
+        nvinfer1::TensorFormat format = engine->getTensorFormat(name);
+        std::cout << "  Tensor format: " << static_cast<int>(format) << "\n";
     }
 
     int N = 10;  // batch

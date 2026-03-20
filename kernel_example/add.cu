@@ -39,6 +39,7 @@ using namespace std;
  * @note kernel函数中只要使用*去解引用指针，则必须保证指针指向的是设备内存，
  *       否则会出现非法访问错误（Illegal memory access）。
  *       因此，在kernel函数中，所有指针参数都必须是设备内存的地址。
+ * @note 对于按值传入的参数，一般会在GPU侧做一个快照，kernel函数中使用的就是这个快照的值，因此在kernel函数中修改这个参数的值不会影响到CPU侧的变量。
  */
 __global__ void VecAdd(int* A, int* B, int* C)
 {
