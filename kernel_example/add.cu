@@ -40,6 +40,14 @@ using namespace std;
  *       否则会出现非法访问错误（Illegal memory access）。
  *       因此，在kernel函数中，所有指针参数都必须是设备内存的地址。
  * @note 对于按值传入的参数，一般会在GPU侧做一个快照，kernel函数中使用的就是这个快照的值，因此在kernel函数中修改这个参数的值不会影响到CPU侧的变量。
+ *
+ * @note kernel函数类型：
+ * 1. __global__: 从CPU调用，在GPU上执行，返回类型必须是void
+ * 2. __device__: 从GPU调用，在GPU上执行，可以有返回值。
+ *                特点是不能从CPU调用，常作为global函数的子函数使用
+ * 3. __host__: 从CPU调用，在CPU上执行。等价于普通的C++函数，可以有返回值。
+ * 4. __host__ __device__: 可以从CPU调用，在CPU上执行；也可以从GPU调用，在GPU上执行。可以有返回值。
+ *    注意：如果函数同时标记为__host__和__device__，则编译器会为该函数生成两个版本：一个在CPU上执行，一个在GPU上执行。编译器会根据调用该函数的上下文来决定使用哪个版本。
  */
 __global__ void VecAdd(int* A, int* B, int* C)
 {
