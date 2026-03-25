@@ -118,6 +118,7 @@ void vec_add_example() {
     CHECK_CUDA(cudaFree(device_result));
 }
 
+/******************************** 2. atomicAdd ********************************/
 __global__ void atomicAdd_kernel(int* data, int* old_data) {
     int old = atomicAdd(data, 1);
     if (old_data) {
@@ -143,6 +144,7 @@ void atomicAdd_example() {
     CHECK_CUDA(cudaFree(d_old_data));
 }
 
+/******************************** 3. Num Test ********************************/
 __global__ void num_test_kernel(int* counter) {
     atomicAdd(counter, 1);
 }
@@ -162,6 +164,65 @@ void exec_num_test() {
     CHECK_CUDA(cudaFree(d_counter));
 }
 
+/******************************** 4. global host device ********************************/
+// 设备辅助函数：只能在 GPU 上被调用
+__device__ int add_dev(int a, int b) {
+    return a + b;
+}
+
+// 主机和设备都可用的小工具函数
+__host__ __device__ int idx_1d() {
+#ifdef __CUDA_ARCH__
+    // 计算全局线程索引
+    return blockIdx.x * blockDim.x + threadIdx.x;
+#else
+    return 0; // 在主机上调用时返回0
+#endif
+}
+
+// 真正的 kernel：CPU 启动，GPU 执行
+__global__ void vec_add_kernel(const int* A, const int* B, int* C, int n) {
+    int i = idx_1d();
+    if (i < n) {
+        C[i] = add_dev(A[i], B[i]);
+    }
+}
+
+void global_host_device_example() {
+    const int n = 8;
+    int hA[n] = {1,2,3,4,5,6,7,8};
+    int hB[n] = {10,20,30,40,50,60,70,80};
+    int hC[n] = {0};
+
+    int *dA = nullptr;
+    int *dB = nullptr;
+    int *dC = nullptr;
+    CHECK_CUDA(cudaMalloc(&dA, n * sizeof(int)));
+    CHECK_CUDA(cudaMalloc(&dB, n * sizeof(int)));
+    CHECK_CUDA(cudaMalloc(&dC, n * sizeof(int)));
+
+    CHECK_CUDA(cudaMemcpy(dA, hA, n * sizeof(int), cudaMemcpyHostToDevice));
+    CHECK_CUDA(cudaMemcpy(dB, hB, n * sizeof(int), cudaMemcpyHostToDevice));
+
+    dim3 block(256);
+    dim3 grid((n + block.x - 1) / block.x);
+    vec_add_kernel<<<grid, block>>>(dA, dB, dC, n);
+
+    CHECK_CUDA(cudaGetLastError());
+    CHECK_CUDA(cudaDeviceSynchronize());
+
+    CHECK_CUDA(cudaMemcpy(hC, dC, n * sizeof(int), cudaMemcpyDeviceToHost));
+
+    for (int i = 0; i < n; ++i) {
+        std::cout << hC[i] << " ";
+    }
+    std::cout << std::endl;
+
+    cudaFree(dA);
+    cudaFree(dB);
+    cudaFree(dC);
+}
+
 int main(){
     std::cout << "================ Vector Addition Example ================" << std::endl;
     vec_add_example();
@@ -169,6 +230,8 @@ int main(){
     atomicAdd_example();
     std::cout << "================ Num Test Example ================" << std::endl;
     exec_num_test();
+    std::cout << "================ Global Host Device Example ================" << std::endl;
+    global_host_device_example();
 
     return 0;
 }
