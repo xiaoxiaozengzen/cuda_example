@@ -169,6 +169,15 @@ int main() {
     for (int i = 0; i < engine->getNbIOTensors(); ++i) {
         const char* name = engine->getIOTensorName(i);
         std::cout << "Tensor " << i << ": " << name << "\n";
+        /**
+         * class Dims32 {
+         * public:
+         *     static constexpr int32_t MAX_DIMS{8}; // 一个张量的最大维度数量
+         *     int32_t nbDims; // 实际维度数量
+         *     int32_t d[MAX_DIMS]; // 每个维度的大小
+         * }
+         * using Dims = Dims32; // TensorRT中常用的维度类型
+         */
         nvinfer1::Dims shape = engine->getTensorShape(name);
         std::cout << "  Shape(" << shape.nbDims << "): [";
         for (int j = 0; j < shape.nbDims; ++j) {
