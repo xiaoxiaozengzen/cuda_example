@@ -98,15 +98,17 @@ size_t adaptTensorFormatAlloc(const nvinfer1::Dims& dims, nvinfer1::TensorFormat
 
 }
 
-int main() {
+void normal() {
+    // 1. 读取序列化的engine文件
     std::string engine_file = "/mnt/workspace/cgz_workspace/Exercise/cuda_example/tensorrt_example/input/deploy.engine";
     std::vector<char> engineData = readFile(engine_file);
     if(engineData.empty()) {
         std::cerr << "Failed to read engine file\n";
-        return -1;
+        return;
     }
     std::cout << "Engine file read successfully, size: " << engineData.size() << " bytes\n";
 
+    // 2. 创建TensorRT runtime
     /**
      * @brief Create TensorRT runtime
      * IRuntime是TensorRT的核心接口，用于管理引擎的生命周期和执行环境。通过反序列化引擎数据创建ICudaEngine实例。
@@ -119,9 +121,10 @@ int main() {
     nvinfer1::IRuntime* runtime = nvinfer1::createInferRuntime(gLogger);
     if(!runtime) {
         std::cerr << "Failed to create TensorRT runtime\n";
-        return -1;
+        return;
     }
 
+    // 3. 反序列化engine
     /**
      * @brief 反序列化一个engine
      * @param blob 包含序列化引擎数据的内存块
@@ -134,9 +137,10 @@ int main() {
     nvinfer1::ICudaEngine* engine = runtime->deserializeCudaEngine(engineData.data(), engineData.size());
     if(!engine) {
         std::cerr << "Failed to deserialize CUDA engine\n";
-        return -1;
+        return;
     }
 
+    // 4. 创建执行上下文
     /**
      * @brief 为引擎创建一个执行上下文
      * @return IExecutionContext* 创建的执行上下文，如果失败则返回nullptr
@@ -151,7 +155,7 @@ int main() {
     nvinfer1::IExecutionContext* context = engine->createExecutionContext();
     if(!context) {
         std::cerr << "Failed to create execution context\n";
-        return -1;
+        return;
     }
 
     const char* inputName = nullptr;
@@ -254,7 +258,7 @@ int main() {
      */
     if (!context->setInputShape(inputName, inDims)) {
         std::cerr << "setInputShape failed\n";
-        return -1;
+        return;
     }
 
     /**
@@ -270,7 +274,7 @@ int main() {
     std::cout << "]\n";
     if (outDims.d[0] < 0) {
         std::cerr << "Output shape unresolved\n";
-        return -1;
+        return;
     }
 
     size_t inCount = static_cast<size_t>(N) * 10;
@@ -286,9 +290,9 @@ int main() {
 
     cudaStream_t stream;
     CHECK_CUDA(cudaStreamCreate(&stream));
-
     CHECK_CUDA(cudaMemcpyAsync(dIn, hIn.data(), inCount * sizeof(float), cudaMemcpyHostToDevice, stream));
 
+    // 5. 设置输出输出张量的现存地址
     /**
      * @brief 设置输入输出张量的显存地址
      * @param tensorName 输入或者输出张量的名称，必须是null-terminated字符串
@@ -300,14 +304,18 @@ int main() {
     context->setTensorAddress(inputName, dIn);
     context->setTensorAddress(outputName, dOut);
 
+    // 6. 执行推理
     /**
      * @brief 异步执行推理
      * @param stream CUDA流，用于异步执行推理kernels
      * @return bool 成功返回true，失败返回false
+     * 
+     * @note V3表示第三版的接口
+     *       V2接口需要一次性设置所有的tensor，V3可以逐个设置tensor
      */
     if (!context->enqueueV3(stream)) {
         std::cerr << "enqueueV3 failed\n";
-        return -1;
+        return;
     }
 
     CHECK_CUDA(cudaMemcpyAsync(hOut.data(), dOut, outCount * sizeof(float), cudaMemcpyDeviceToHost, stream));
@@ -325,5 +333,132 @@ int main() {
     delete context;
     delete engine;
     delete runtime;
+}
+
+void with_graph() {
+    std::string engine_file = "/mnt/workspace/cgz_workspace/Exercise/cuda_example/tensorrt_example/input/deploy.engine";
+    std::vector<char> engineData = readFile(engine_file);
+    if(engineData.empty()) {
+        std::cerr << "Failed to read engine file\n";
+        return;
+    }
+    std::cout << "Engine file read successfully, size: " << engineData.size() << " bytes\n";
+
+    nvinfer1::IRuntime* runtime = nvinfer1::createInferRuntime(gLogger);
+    if(!runtime) {
+        std::cerr << "Failed to create TensorRT runtime\n";
+        return;
+    }
+    nvinfer1::ICudaEngine* engine = runtime->deserializeCudaEngine(engineData.data(), engineData.size());
+    if(!engine) {
+        std::cerr << "Failed to deserialize CUDA engine\n";
+        return;
+    }
+    nvinfer1::IExecutionContext* context = engine->createExecutionContext();
+    if(!context) {
+        std::cerr << "Failed to create execution context\n";
+        return;
+    }
+
+    const char* inputName = nullptr;
+    const char* outputName = nullptr;
+    for (int i = 0; i < engine->getNbIOTensors(); ++i) {
+        const char* name = engine->getIOTensorName(i);
+        nvinfer1::Dims shape = engine->getTensorShape(name);
+        if (engine->getTensorIOMode(name) == nvinfer1::TensorIOMode::kINPUT) {
+            inputName = name;
+        } else {
+            outputName = name;
+        }
+        nvinfer1::DataType dtype = engine->getTensorDataType(name);
+        std::cout << "  Data type: " << static_cast<int>(dtype) << "\n";
+        nvinfer1::TensorFormat format = engine->getTensorFormat(name);
+        std::cout << "  Tensor format: " << static_cast<int>(format) << "\n";
+    }
+
+    int N = 10;  // batch
+    nvinfer1::Dims inDims;
+    inDims.nbDims = 2;
+    inDims.d[0] = N;
+    inDims.d[1] = 10;
+    if (!context->setInputShape(inputName, inDims)) {
+        std::cerr << "setInputShape failed\n";
+        return;
+    }
+    auto outDims = context->getTensorShape(outputName); // 应该是 [N,1]
+    std::cout << "Output shape: [";
+    for (int i = 0; i < outDims.nbDims; ++i) {
+        std::cout << outDims.d[i] << (i < outDims.nbDims - 1 ? ", " : "");
+    }
+    std::cout << "]\n";
+    if (outDims.d[0] < 0) {
+        std::cerr << "Output shape unresolved\n";
+        return;
+    }
+
+    size_t inCount = static_cast<size_t>(N) * 10;
+    size_t outCount = volume(outDims);
+    std::vector<float> hIn(inCount, 0.5f);
+    std::vector<float> hOut(outCount, 0.0f);
+
+    float* dIn = nullptr;
+    float* dOut = nullptr;
+    CHECK_CUDA(cudaMalloc(reinterpret_cast<void**>(&dIn), inCount * sizeof(float)));
+    CHECK_CUDA(cudaMalloc(reinterpret_cast<void**>(&dOut), outCount * sizeof(float)));
+
+    cudaGraph_t graph;
+    cudaGraphExec_t graphExec;
+    cudaStream_t stream;
+    CHECK_CUDA(cudaStreamCreate(&stream));
+
+    context->setTensorAddress(inputName, dIn);
+    context->setTensorAddress(outputName, dOut);
+
+    /**
+     * 这里再capture之前先执行一次enqueueV3来让TensorRT完成内核选择和资源分配等准备工作，这样在capture时就能得到更准确的性能表现。
+     * - 如果不先执行一次enqueueV3，capture时可能会包含一些额外的开销，例如内核选择和资源分配等，导致测量的性能不准确。
+     * - 先执行一次enqueueV3可以让TensorRT完成这些准备工作，从而在capture时只测量实际的推理执行时间，提高性能测量的准确性。
+     */
+    if (!context->enqueueV3(stream)) {
+        std::cerr << "enqueueV3 failed\n";
+        return;
+    }
+    CHECK_CUDA(cudaStreamSynchronize(stream));
+    CHECK_CUDA(cudaStreamBeginCapture(stream, cudaStreamCaptureModeThreadLocal));
+    context->enqueueV3(stream);
+    CHECK_CUDA(cudaStreamEndCapture(stream, &graph));
+    CHECK_CUDA(cudaGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
+    CHECK_CUDA(cudaGraphLaunch(graphExec, stream));
+
+    // 循环推理多次来观察性能差异
+    for (int i = 0; i < 10; ++i) {
+        hIn.resize(inCount, 10.0f * i); // 修改输入数据以观察输出变化
+        CHECK_CUDA(cudaMemcpyAsync(dIn, hIn.data(), inCount * sizeof(float), cudaMemcpyHostToDevice, stream));
+        CHECK_CUDA(cudaGraphLaunch(graphExec, stream));
+        CHECK_CUDA(cudaMemcpyAsync(hOut.data(), dOut, outCount * sizeof(float), cudaMemcpyDeviceToHost, stream));
+        CHECK_CUDA(cudaStreamSynchronize(stream));
+        std::cout << "Output:\n";
+        for (size_t i = 0; i < outCount; ++i) {
+            std::cout << hOut[i] << " ";
+        }
+        std::cout << "\n";
+    }
+
+    CHECK_CUDA(cudaGraphExecDestroy(graphExec));
+    CHECK_CUDA(cudaGraphDestroy(graph));
+    CHECK_CUDA(cudaFree(dIn));
+    CHECK_CUDA(cudaFree(dOut));
+    CHECK_CUDA(cudaStreamDestroy(stream));
+    delete context;
+    delete engine;
+    delete runtime;    
+}
+
+int main() {
+    std::cout << "======================= Normal execution =======================" << std::endl;
+    normal();
+    std::cout << "======================= Execution with graph =======================" << std::endl;
+    with_graph();
+
     return 0;
 }
