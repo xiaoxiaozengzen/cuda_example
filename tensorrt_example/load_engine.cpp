@@ -123,6 +123,24 @@ void normal() {
         std::cerr << "Failed to create TensorRT runtime\n";
         return;
     }
+    /**
+     * @brief 获取DLA核心数量
+     * @return int DLA核心数量，如果没有DLA支持则返回0
+     *
+     * @note DLA（Deep Learning Accelerator）是NVIDIA提供的专用硬件加速器，用于高效执行深度学习推理任务。某些TensorRT引擎可能会使用DLA核心来加速推理。
+     *       通过调用getMaxDLACore()方法，可以查询当前系统中可用的DLA核心数量，以便在反序列化引擎时正确配置DLA支持。
+     *       如果引擎中使用了DLA核心但系统没有可用的DLA核心，反序列化过程将失败。
+     *       因此，在反序列化引擎之前，建议先调用getMaxDLACore()方法检查系统的DLA支持情况，
+     *       并根据需要调整引擎的配置或选择适当的设备进行推理。
+     */
+    int dla_core = runtime->getNbDLACores();
+    std::cout << "Max DLA core: " << dla_core << std::endl;
+    /**
+     * @brief 返回当前使用的DLA核心索引
+     * @return int 当前使用的DLA核心索引，如果没有使用DLA核心则返回-1
+     */
+    int current_dla_core = runtime->getDLACore();
+    std::cout << "Current DLA core: " << current_dla_core << std::endl;
 
     // 3. 反序列化engine
     /**
@@ -157,6 +175,22 @@ void normal() {
         std::cerr << "Failed to create execution context\n";
         return;
     }
+    /**
+     * @brief 获取当前engine执行时最多会使用的辅助流数量
+     * @return int 辅助流数量
+     *
+     * @note enqueuev3使用主stream，但是tensorrt为了提速，可能会把一些算子放到其他stream上并行跑
+     *       这些内部额外使用的stream就叫aux stream，getNbAuxStreams可以查询当前engine执行时最多会使用的aux stream数量
+     *       以便用户在需要时创建和管理这些stream来配合tensorrt的执行策略，从而提高推理性能。
+     */
+    // int aux_count = engine->getNbAuxStreams();
+    // std::cout << "Engine has " << aux_count << " auxiliary streams\n";
+    // std::vector<cudaStream_t> aux_streams(aux_count);
+    // for(int i = 0; i < aux_count; ++i) {
+    //     CHECK_CUDA(cudaStreamCreate(&aux_streams[i]));
+    // }
+    // engine->setAuxStreams(aux_streams.data(), aux_count);
+
 
     const char* inputName = nullptr;
     const char* outputName = nullptr;
