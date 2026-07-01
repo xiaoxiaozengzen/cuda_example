@@ -100,7 +100,7 @@ size_t adaptTensorFormatAlloc(const nvinfer1::Dims& dims, nvinfer1::TensorFormat
 
 void normal() {
     // 1. 读取序列化的engine文件
-    std::string engine_file = "/mnt/workspace/cgz_workspace/Exercise/cuda_example/tensorrt_example/input/deploy.engine";
+    std::string engine_file = "/mnt/workspace/cgz_workspace/Exercise/cuda_example/tensorrt_example/model/normal.trt";
     std::vector<char> engineData = readFile(engine_file);
     if(engineData.empty()) {
         std::cerr << "Failed to read engine file\n";
@@ -370,7 +370,7 @@ void normal() {
 }
 
 void with_graph() {
-    std::string engine_file = "/mnt/workspace/cgz_workspace/Exercise/cuda_example/tensorrt_example/input/deploy.engine";
+    std::string engine_file = "/mnt/workspace/cgz_workspace/Exercise/cuda_example/tensorrt_example/model/normal.trt";
     std::vector<char> engineData = readFile(engine_file);
     if(engineData.empty()) {
         std::cerr << "Failed to read engine file\n";
