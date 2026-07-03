@@ -29,3 +29,15 @@ target_link_libraries(
     CUDA::cudart 
     ${tensorrt_LIBRARIES}
 )
+
+add_executable(backbone_head backbone_head.cpp)
+target_include_directories(
+    backbone_head PRIVATE 
+    ${CUDAToolkit_INCLUDE_DIRS}
+    ${tensorrt_INCLUDE_DIRS}
+)
+target_link_libraries(
+    backbone_head PRIVATE 
+    CUDA::cudart 
+    ${tensorrt_LIBRARIES}
+)
