@@ -7,6 +7,7 @@
 #include "common.hpp"
 
 #include <NvInfer.h>
+#include <NvInferRuntime.h>
 #include <cuda_runtime_api.h>
 
 #include <chrono>
@@ -17,13 +18,15 @@
 #include <vector>
 
 // ---- Configuration (edit and rebuild) ---------------------------------------------------------
-static const char* const kEnginePath  = "model_dla0.trt";
+static const char* const kEnginePath  = "/mnt/workspace/cgz_workspace/Exercise/cuda_example/dla/output/model_dla0.trt";
 static const int         kDlaCore     = 0;      // Must match the core the engine was built for.
 static const int         kIterations  = 100;    // Warm-up is separate and excluded from timing.
 static const char* const kInputPath   = "";     // "" -> feed zeros. Otherwise raw bytes concatenated
                                                 // in the tensor order printed at load time.
 static const char* const kOutputPrefix = "";    // "" -> only print byte-sum checksum.
                                                 // Otherwise writes <prefix>.<tensor_name> per output.
+static const char* const kInputName     = "input";
+static const char* const kOutputname     = "output";                                            
 // ------------------------------------------------------------------------------------------------
 
 namespace {
@@ -49,6 +52,8 @@ int main() {
         return 1;
     }
 
+    // 必须在deserializaeCudaEngine之前setDLACore
+    // core可以设置成不同于build时指定的core，但是有可能会运行时失败。比如在build跟run时的core架构不适配
     const int nb_dla = runtime->getNbDLACores();
     if (nb_dla > 0 && kDlaCore >= 0 && kDlaCore < nb_dla) {
         runtime->setDLACore(kDlaCore);
@@ -73,7 +78,28 @@ int main() {
         return 1;
     }
 
-    // 2) Enumerate I/O tensors, allocate device buffers -----------------------------------------
+    // 2) 设置动态shape。需要使用engine中携带的额外profile进行设置。
+    cudaStream_t stream_batch;
+    DLA_EXAMPLE_CUDA_CHECK(cudaStreamCreate(&stream_batch));
+    if(engine->getNbOptimizationProfiles() > 0) {
+        std::cerr << "getNbOptimizationProfiles success " << std::endl;
+        if(!context->setOptimizationProfileAsync(0, stream_batch)) {
+            std::cerr << "setOptimizationProfileAsync failed" << std::endl;
+            return 1;
+        }
+
+        nvinfer1::Dims intput_fixed_dim = engine->getProfileShape(kInputName, 0, nvinfer1::OptProfileSelector::kOPT);
+        if(!context->setInputShape(kInputName, intput_fixed_dim)) {
+            std::cerr << "setInputShape failed for " << kInputName << std::endl;
+            return 1;
+        }
+        std::cerr << "fixed tsnsor " << kInputName << ": " << dla_example::DimsToString(intput_fixed_dim) << std::endl;
+
+    } else {
+        std::cerr << "getNbOptimizationProfiles failed " << std::endl;
+    }
+
+    // 3) Enumerate I/O tensors, allocate device buffers -----------------------------------------
     std::vector<Binding> bindings;
     const int nb_io = engine->getNbIOTensors();
     bindings.reserve(nb_io);
@@ -102,7 +128,7 @@ int main() {
         bindings.push_back(b);
     }
 
-    // 3) Populate inputs -------------------------------------------------------------------------
+    // 4) Populate inputs -------------------------------------------------------------------------
     const std::string input_path = kInputPath;
     if (!input_path.empty()) {
         std::vector<char> input_host = dla_example::ReadBinaryFile(input_path);
@@ -128,7 +154,7 @@ int main() {
         std::cout << "No input file configured; feeding zeros." << std::endl;
     }
 
-    // 4) Execute ---------------------------------------------------------------------------------
+    // 5) Execute ---------------------------------------------------------------------------------
     cudaStream_t stream;
     DLA_EXAMPLE_CUDA_CHECK(cudaStreamCreate(&stream));
 
@@ -152,7 +178,7 @@ int main() {
     std::cout << "Ran " << kIterations << " iteration(s) in " << ms_total << " ms ("
               << (ms_total / kIterations) << " ms/iter, warm-up excluded)." << std::endl;
 
-    // 5) Copy outputs and print checksums --------------------------------------------------------
+    // 6) Copy outputs and print checksums --------------------------------------------------------
     const std::string output_prefix = kOutputPrefix;
     for (auto& b : bindings) {
         if (b.is_input) continue;
@@ -172,10 +198,11 @@ int main() {
         }
     }
 
-    // 6) Cleanup ---------------------------------------------------------------------------------
+    // 7) Cleanup ---------------------------------------------------------------------------------
     for (auto& b : bindings) {
         cudaFree(b.d_ptr);
     }
+    cudaStreamDestroy(stream_batch);
     cudaStreamDestroy(stream);
     return 0;
 }

@@ -16,13 +16,13 @@
 
 // ---- Configuration (edit and rebuild) ---------------------------------------------------------
 static const char* const kOnnxPath      = "/mnt/workspace/cgz_workspace/Exercise/cuda_example/dla/model/normal.onnx";
-static const char* const kEnginePath    = "model_dla0.trt";
+static const char* const kEnginePath    = "/mnt/workspace/cgz_workspace/Exercise/cuda_example/dla/output/model_dla0.trt";
 static const int         kDlaCore       = 0;      // Orin has cores 0 and 1.
 static const bool        kUseInt8       = false;  // false -> FP16. INT8 needs QAT ranges in ONNX.
 static const size_t      kWorkspaceMiB  = 512;
 static const bool        kGpuFallback   = true;   // Layers not supported on DLA run on GPU.
-static const char* const kInputName     = "";
-static const char* const kOutputname     = "";
+static const char* const kInputName     = "input";
+static const char* const kOutputname     = "output";
 
 // ------------------------------------------------------------------------------------------------
 
@@ -70,10 +70,15 @@ int main() {
         std::cerr << "createOptimizationProfile failed" << std::endl;
         return 1;
     }
-
     nvinfer1::Dims input_dims;
-    input_dims.nbDims = 4;
+    input_dims.nbDims = 2;
+    input_dims.d[0] = 10;
+    input_dims.d[1] = 10;
     profile->setDimensions(kInputName, nvinfer1::OptProfileSelector::kMIN, input_dims);
+    profile->setDimensions(kInputName, nvinfer1::OptProfileSelector::kOPT, input_dims);
+    profile->setDimensions(kInputName, nvinfer1::OptProfileSelector::kMAX, input_dims);
+    // 不要对输出张量设置其batch大小
+    config->addOptimizationProfile(profile);
 
     const int32_t nb_dla_cores = builder->getNbDLACores();
     std::cout << "Platform reports " << nb_dla_cores << " DLA core(s)." << std::endl;
